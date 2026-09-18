@@ -1,0 +1,4078 @@
+// ==UserScript==
+// @name         메뉴잇 번역본 병합기 AUTO LOCAL v7.1
+// @namespace    yangoon.menuit.translation
+// @version      0.7.1
+// @description  외부 통신 없이 고객 번역본 A를 현재 기준파일 B에 로컬 병합합니다.
+// @match        https://argos.skshieldus.com/*
+// @run-at       document-idle
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    const TOOL_NAME = '메뉴잇 번역본 병합기 AUTO LOCAL';
+    const MAX_HEADER_SCAN_ROWS = 30;
+
+    const SHEET_CONFIGS = {
+        '카테고리': {
+            key: 'ko_name',
+            id: 'category_id',
+            parent: null,
+            context: null,
+            targets: [
+                'en_name',
+                'zh_name',
+                'ja_name',
+                'ru_name',
+                'ko_desc',
+                'en_desc',
+                'zh_desc',
+                'ja_desc',
+                'ru_desc'
+            ]
+        },
+
+        '메뉴': {
+            key: 'ko_name',
+            id: 'menu_id',
+            parent: 'category_id',
+            context: 'menu_category',
+            targets: [
+                'en_name',
+                'zh_name',
+                'ja_name',
+                'ru_name',
+                'ko_desc',
+                'en_desc',
+                'zh_desc',
+                'ja_desc',
+                'ru_desc'
+            ]
+        },
+
+        '옵션': {
+            key: 'ko_option',
+            id: 'option_id',
+            parent: 'menu_id',
+            context: null,
+            targets: [
+                'en_option',
+                'zh_option',
+                'ja_option',
+                'ru_option'
+            ]
+        },
+
+        '옵션아이템': {
+            key: 'ko_option_item',
+            id: 'option_item_id',
+            parent: 'option_id',
+            context: null,
+            targets: [
+                'en_option_item',
+                'zh_option_item',
+                'ja_option_item',
+                'ru_option_item'
+            ]
+        }
+    };
+
+
+    const DISPLAY_NAMES = {
+        en_name: '영어 이름',
+        zh_name: '중국어 이름',
+        ja_name: '일본어 이름',
+        ru_name: '러시아어 이름',
+
+        ko_desc: '한국어 설명',
+        en_desc: '영어 설명',
+        zh_desc: '중국어 설명',
+        ja_desc: '일본어 설명',
+        ru_desc: '러시아어 설명',
+
+        en_option: '영어 옵션명',
+        zh_option: '중국어 옵션명',
+        ja_option: '일본어 옵션명',
+        ru_option: '러시아어 옵션명',
+
+        en_option_item: '영어 옵션아이템명',
+        zh_option_item: '중국어 옵션아이템명',
+        ja_option_item: '일본어 옵션아이템명',
+        ru_option_item: '러시아어 옵션아이템명'
+    };
+
+
+    let panel = null;
+
+
+    window.addEventListener('keydown', (e) => {
+
+        if (
+            e.ctrlKey &&
+            e.shiftKey &&
+            e.code === 'KeyE'
+        ) {
+
+            e.preventDefault();
+
+            togglePanel();
+        }
+    });
+
+
+    function togglePanel() {
+
+        if (panel) {
+
+            panel.remove();
+
+            panel = null;
+
+            return;
+        }
+
+
+        panel =
+            document.createElement(
+                'div'
+            );
+
+
+        panel.innerHTML = `
+
+        <div id="yg-header">
+
+            <b id="yg-title">
+                ${TOOL_NAME}
+            </b>
+
+            <button
+                id="yg-close"
+                type="button"
+            >
+                ×
+            </button>
+
+        </div>
+
+
+        <div id="yg-body">
+
+            <div id="yg-info">
+
+                <b>A = 고객 번역본</b>
+                (번역값 공급)
+
+                <br>
+
+                <b>B = 현재 기준파일</b>
+                (최종 구조 기준)
+
+                <br><br>
+
+                B의 탭·행·순서·ID·가격 등은 그대로 유지하고,
+
+                <br>
+
+                A의
+                <b>번역 이름/설명 값만</b>
+                병합합니다.
+
+                <br><br>
+
+                <b>
+                    외부 서버 전송 없음 · 완전 로컬 처리
+                </b>
+
+            </div>
+
+
+            <div class="yg-field">
+
+                <b class="yg-label">
+                    1. 고객 번역본 A
+                </b>
+
+                <input
+                    id="yg-a"
+                    type="file"
+                    accept=".xlsx,.xlsm"
+                >
+
+            </div>
+
+
+            <div class="yg-field">
+
+                <b class="yg-label">
+                    2. 현재 기준파일 B
+                </b>
+
+                <input
+                    id="yg-b"
+                    type="file"
+                    accept=".xlsx,.xlsm"
+                >
+
+            </div>
+
+
+            <button
+                id="yg-run"
+                type="button"
+            >
+                번역 병합하기
+            </button>
+
+
+            <pre id="yg-log">A와 B 파일을 선택하세요.</pre>
+
+        </div>
+        `;
+
+
+        /*
+         * 기본 Panel
+         */
+
+        setImportant(
+            panel,
+            'position',
+            'fixed'
+        );
+
+        setImportant(
+            panel,
+            'z-index',
+            '2147483647'
+        );
+
+        setImportant(
+            panel,
+            'top',
+            '20px'
+        );
+
+        setImportant(
+            panel,
+            'right',
+            '20px'
+        );
+
+        setImportant(
+            panel,
+            'width',
+            '500px'
+        );
+
+        setImportant(
+            panel,
+            'max-width',
+            'calc(100vw - 40px)'
+        );
+
+        setImportant(
+            panel,
+            'max-height',
+            '90vh'
+        );
+
+        setImportant(
+            panel,
+            'overflow',
+            'auto'
+        );
+
+        setImportant(
+            panel,
+            'display',
+            'block'
+        );
+
+        setImportant(
+            panel,
+            'visibility',
+            'visible'
+        );
+
+        setImportant(
+            panel,
+            'opacity',
+            '1'
+        );
+
+        setImportant(
+            panel,
+            'background',
+            '#ffffff'
+        );
+
+        setImportant(
+            panel,
+            'color',
+            '#111111'
+        );
+
+        setImportant(
+            panel,
+            'border',
+            '1px solid #777777'
+        );
+
+        setImportant(
+            panel,
+            'border-radius',
+            '10px'
+        );
+
+        setImportant(
+            panel,
+            'box-shadow',
+            '0 8px 28px rgba(0,0,0,.30)'
+        );
+
+        setImportant(
+            panel,
+            'font-family',
+            'Arial, "Malgun Gothic", sans-serif'
+        );
+
+        setImportant(
+            panel,
+            'font-size',
+            '13px'
+        );
+
+        setImportant(
+            panel,
+            'line-height',
+            '1.5'
+        );
+
+
+        document.body.appendChild(
+            panel
+        );
+
+
+        /*
+         * ARGOS CSS 강제 무력화
+         */
+
+        forceUiStyles();
+
+
+        panel
+            .querySelector(
+                '#yg-close'
+            )
+            .addEventListener(
+                'click',
+                togglePanel
+            );
+
+
+        panel
+            .querySelector(
+                '#yg-run'
+            )
+            .addEventListener(
+                'click',
+                runMerge
+            );
+    }
+
+
+    function setImportant(
+        element,
+        property,
+        value
+    ) {
+
+        element.style.setProperty(
+            property,
+            value,
+            'important'
+        );
+    }
+
+
+    function forceUiStyles() {
+
+        /*
+         * Panel 안 일반 텍스트
+         */
+
+        panel
+            .querySelectorAll(
+                'div, b, span, label'
+            )
+            .forEach(
+                (element) => {
+
+                    setImportant(
+                        element,
+                        'color',
+                        '#111111'
+                    );
+
+                    setImportant(
+                        element,
+                        'visibility',
+                        'visible'
+                    );
+
+                    setImportant(
+                        element,
+                        'opacity',
+                        '1'
+                    );
+
+                    setImportant(
+                        element,
+                        'font-family',
+                        'Arial, "Malgun Gothic", sans-serif'
+                    );
+                }
+            );
+
+
+        const header =
+            panel.querySelector(
+                '#yg-header'
+            );
+
+
+        setImportant(
+            header,
+            'display',
+            'flex'
+        );
+
+        setImportant(
+            header,
+            'align-items',
+            'center'
+        );
+
+        setImportant(
+            header,
+            'justify-content',
+            'space-between'
+        );
+
+        setImportant(
+            header,
+            'padding',
+            '12px'
+        );
+
+        setImportant(
+            header,
+            'background',
+            '#eeeeee'
+        );
+
+        setImportant(
+            header,
+            'border-bottom',
+            '1px solid #cccccc'
+        );
+
+
+        const title =
+            panel.querySelector(
+                '#yg-title'
+            );
+
+
+        setImportant(
+            title,
+            'display',
+            'block'
+        );
+
+        setImportant(
+            title,
+            'color',
+            '#111111'
+        );
+
+        setImportant(
+            title,
+            'font-size',
+            '16px'
+        );
+
+        setImportant(
+            title,
+            'font-weight',
+            '700'
+        );
+
+
+        const closeButton =
+            panel.querySelector(
+                '#yg-close'
+            );
+
+
+        setImportant(
+            closeButton,
+            'display',
+            'inline-block'
+        );
+
+        setImportant(
+            closeButton,
+            'visibility',
+            'visible'
+        );
+
+        setImportant(
+            closeButton,
+            'opacity',
+            '1'
+        );
+
+        setImportant(
+            closeButton,
+            'width',
+            '36px'
+        );
+
+        setImportant(
+            closeButton,
+            'height',
+            '36px'
+        );
+
+        setImportant(
+            closeButton,
+            'padding',
+            '0'
+        );
+
+        setImportant(
+            closeButton,
+            'border',
+            '0'
+        );
+
+        setImportant(
+            closeButton,
+            'background',
+            'transparent'
+        );
+
+        setImportant(
+            closeButton,
+            'color',
+            '#111111'
+        );
+
+        setImportant(
+            closeButton,
+            'font-size',
+            '24px'
+        );
+
+        setImportant(
+            closeButton,
+            'cursor',
+            'pointer'
+        );
+
+
+        const body =
+            panel.querySelector(
+                '#yg-body'
+            );
+
+
+        setImportant(
+            body,
+            'display',
+            'block'
+        );
+
+        setImportant(
+            body,
+            'padding',
+            '14px'
+        );
+
+        setImportant(
+            body,
+            'background',
+            '#ffffff'
+        );
+
+        setImportant(
+            body,
+            'color',
+            '#111111'
+        );
+
+
+        const info =
+            panel.querySelector(
+                '#yg-info'
+            );
+
+
+        setImportant(
+            info,
+            'display',
+            'block'
+        );
+
+        setImportant(
+            info,
+            'padding',
+            '10px'
+        );
+
+        setImportant(
+            info,
+            'margin-bottom',
+            '14px'
+        );
+
+        setImportant(
+            info,
+            'background',
+            '#f5f5f5'
+        );
+
+        setImportant(
+            info,
+            'color',
+            '#111111'
+        );
+
+        setImportant(
+            info,
+            'border',
+            '1px solid #dddddd'
+        );
+
+        setImportant(
+            info,
+            'border-radius',
+            '6px'
+        );
+
+
+        panel
+            .querySelectorAll(
+                '.yg-field'
+            )
+            .forEach(
+                (element) => {
+
+                    setImportant(
+                        element,
+                        'display',
+                        'block'
+                    );
+
+                    setImportant(
+                        element,
+                        'margin-bottom',
+                        '14px'
+                    );
+
+                    setImportant(
+                        element,
+                        'color',
+                        '#111111'
+                    );
+                }
+            );
+
+
+        panel
+            .querySelectorAll(
+                '.yg-label'
+            )
+            .forEach(
+                (element) => {
+
+                    setImportant(
+                        element,
+                        'display',
+                        'block'
+                    );
+
+                    setImportant(
+                        element,
+                        'margin-bottom',
+                        '7px'
+                    );
+
+                    setImportant(
+                        element,
+                        'color',
+                        '#111111'
+                    );
+                }
+            );
+
+
+        panel
+            .querySelectorAll(
+                'input[type="file"]'
+            )
+            .forEach(
+                (element) => {
+
+                    setImportant(
+                        element,
+                        'display',
+                        'block'
+                    );
+
+                    setImportant(
+                        element,
+                        'visibility',
+                        'visible'
+                    );
+
+                    setImportant(
+                        element,
+                        'opacity',
+                        '1'
+                    );
+
+                    setImportant(
+                        element,
+                        'width',
+                        '100%'
+                    );
+
+                    setImportant(
+                        element,
+                        'min-height',
+                        '40px'
+                    );
+
+                    setImportant(
+                        element,
+                        'padding',
+                        '6px'
+                    );
+
+                    setImportant(
+                        element,
+                        'background',
+                        '#ffffff'
+                    );
+
+                    setImportant(
+                        element,
+                        'color',
+                        '#111111'
+                    );
+
+                    setImportant(
+                        element,
+                        'border',
+                        '1px solid #aaaaaa'
+                    );
+                }
+            );
+
+
+        const runButton =
+            panel.querySelector(
+                '#yg-run'
+            );
+
+
+        setImportant(
+            runButton,
+            'display',
+            'block'
+        );
+
+        setImportant(
+            runButton,
+            'visibility',
+            'visible'
+        );
+
+        setImportant(
+            runButton,
+            'opacity',
+            '1'
+        );
+
+        setImportant(
+            runButton,
+            'width',
+            '100%'
+        );
+
+        setImportant(
+            runButton,
+            'height',
+            '48px'
+        );
+
+        setImportant(
+            runButton,
+            'min-height',
+            '48px'
+        );
+
+        setImportant(
+            runButton,
+            'padding',
+            '10px'
+        );
+
+        setImportant(
+            runButton,
+            'background',
+            '#222222'
+        );
+
+        setImportant(
+            runButton,
+            'color',
+            '#ffffff'
+        );
+
+        setImportant(
+            runButton,
+            'border',
+            '1px solid #111111'
+        );
+
+        setImportant(
+            runButton,
+            'border-radius',
+            '6px'
+        );
+
+        setImportant(
+            runButton,
+            'font-size',
+            '15px'
+        );
+
+        setImportant(
+            runButton,
+            'font-weight',
+            '700'
+        );
+
+        setImportant(
+            runButton,
+            'cursor',
+            'pointer'
+        );
+
+
+        const log =
+            panel.querySelector(
+                '#yg-log'
+            );
+
+
+        setImportant(
+            log,
+            'display',
+            'block'
+        );
+
+        setImportant(
+            log,
+            'visibility',
+            'visible'
+        );
+
+        setImportant(
+            log,
+            'opacity',
+            '1'
+        );
+
+        setImportant(
+            log,
+            'width',
+            '100%'
+        );
+
+        setImportant(
+            log,
+            'min-height',
+            '150px'
+        );
+
+        setImportant(
+            log,
+            'max-height',
+            '380px'
+        );
+
+        setImportant(
+            log,
+            'overflow',
+            'auto'
+        );
+
+        setImportant(
+            log,
+            'margin-top',
+            '14px'
+        );
+
+        setImportant(
+            log,
+            'padding',
+            '12px'
+        );
+
+        setImportant(
+            log,
+            'background',
+            '#111111'
+        );
+
+        setImportant(
+            log,
+            'color',
+            '#eeeeee'
+        );
+
+        setImportant(
+            log,
+            'border',
+            '0'
+        );
+
+        setImportant(
+            log,
+            'border-radius',
+            '6px'
+        );
+
+        setImportant(
+            log,
+            'white-space',
+            'pre-wrap'
+        );
+
+        setImportant(
+            log,
+            'font-family',
+            'Consolas, "Malgun Gothic", monospace'
+        );
+
+        setImportant(
+            log,
+            'font-size',
+            '12px'
+        );
+    }
+
+
+    async function runMerge() {
+
+        const logEl =
+            panel.querySelector(
+                '#yg-log'
+            );
+
+
+        const button =
+            panel.querySelector(
+                '#yg-run'
+            );
+
+
+        const aFile =
+            panel
+                .querySelector(
+                    '#yg-a'
+                )
+                .files[0];
+
+
+        const bFile =
+            panel
+                .querySelector(
+                    '#yg-b'
+                )
+                .files[0];
+
+
+        if (
+            !aFile ||
+            !bFile
+        ) {
+
+            logEl.textContent =
+                '고객 번역본 A와 현재 기준파일 B를 모두 선택하세요.';
+
+            return;
+        }
+
+
+        if (
+            typeof DecompressionStream ===
+            'undefined'
+        ) {
+
+            logEl.textContent =
+                '현재 Edge 버전은 로컬 XLSX 압축 해제를 지원하지 않습니다.';
+
+            return;
+        }
+
+
+        button.disabled =
+            true;
+
+
+        button.textContent =
+            '병합 중...';
+
+
+        logEl.textContent =
+            '파일을 로컬에서 읽고 있습니다...';
+
+
+        try {
+
+            const [
+                aBuffer,
+                bBuffer
+            ] =
+                await Promise.all([
+                    aFile.arrayBuffer(),
+                    bFile.arrayBuffer()
+                ]);
+
+
+            const aBook =
+                await loadXlsx(
+                    aBuffer
+                );
+
+
+            const bBook =
+                await loadXlsx(
+                    bBuffer
+                );
+
+
+            let totalBRows =
+                0;
+
+            let totalMatchedRows =
+                0;
+
+            let totalBOnlyRows =
+                0;
+
+            let totalAOnlyIgnored =
+                0;
+
+            let totalChangedCells =
+                0;
+
+            let totalABlankKeptB =
+                0;
+
+            let totalSameValues =
+                0;
+
+            let totalAmbiguous =
+                0;
+
+            let processedSheets =
+                0;
+
+
+            const sheetLogs =
+                [];
+
+
+            for (
+                const [
+                    sheetName,
+                    config
+                ]
+                of Object.entries(
+                    SHEET_CONFIGS
+                )
+            ) {
+
+                const bPath =
+                    bBook
+                        .sheetMap
+                        .get(
+                            sheetName
+                        );
+
+
+                if (!bPath) {
+
+                    sheetLogs.push(
+                        `[${sheetName}]\nB에 탭 없음 → 건너뜀`
+                    );
+
+                    continue;
+                }
+
+
+                const aPath =
+                    aBook
+                        .sheetMap
+                        .get(
+                            sheetName
+                        );
+
+
+                if (!aPath) {
+
+                    sheetLogs.push(
+                        `[${sheetName}]\nA에 탭 없음 → B 그대로 유지`
+                    );
+
+                    continue;
+                }
+
+
+                const bXml =
+                    bBook.zip.getText(
+                        bPath
+                    );
+
+
+                const aXml =
+                    aBook.zip.getText(
+                        aPath
+                    );
+
+
+                if (
+                    bXml == null ||
+                    aXml == null
+                ) {
+
+                    throw new Error(
+                        `[${sheetName}] 내부 데이터를 읽을 수 없습니다.`
+                    );
+                }
+
+
+                const bDoc =
+                    parseXml(
+                        bXml
+                    );
+
+
+                const aDoc =
+                    parseXml(
+                        aXml
+                    );
+
+
+                const bHeader =
+                    findHeaderInfo(
+                        bDoc,
+                        bBook.sharedStrings,
+                        config.key
+                    );
+
+
+                const aHeader =
+                    findHeaderInfo(
+                        aDoc,
+                        aBook.sharedStrings,
+                        config.key
+                    );
+
+
+                if (!bHeader) {
+
+                    throw new Error(
+                        `[${sheetName}] B에서 한국어 기준 헤더를 찾지 못했습니다.`
+                    );
+                }
+
+
+                if (!aHeader) {
+
+                    sheetLogs.push(
+                        `[${sheetName}]\nA에서 한국어 기준 헤더를 찾지 못함 → B 그대로 유지`
+                    );
+
+                    continue;
+                }
+
+
+                const bTargets =
+                    config.targets.filter(
+                        target =>
+                            bHeader
+                                .columns
+                                .has(
+                                    target
+                                )
+                    );
+
+
+                if (
+                    bTargets.length ===
+                    0
+                ) {
+
+                    continue;
+                }
+
+
+                const commonTargets =
+                    bTargets.filter(
+                        target =>
+                            aHeader
+                                .columns
+                                .has(
+                                    target
+                                )
+                    );
+
+
+                const aRows =
+                    extractRows(
+                        aDoc,
+                        aBook.sharedStrings,
+                        aHeader,
+                        config,
+                        commonTargets
+                    );
+
+
+                const bRows =
+                    extractRows(
+                        bDoc,
+                        bBook.sharedStrings,
+                        bHeader,
+                        config,
+                        bTargets
+                    );
+
+
+                const aByKey =
+                    new Map();
+
+
+                for (
+                    const row
+                    of aRows
+                ) {
+
+                    if (
+                        !aByKey.has(
+                            row.key
+                        )
+                    ) {
+
+                        aByKey.set(
+                            row.key,
+                            []
+                        );
+                    }
+
+
+                    aByKey
+                        .get(
+                            row.key
+                        )
+                        .push(
+                            row
+                        );
+                }
+
+
+                const usedA =
+                    new Set();
+
+
+                let matchedRows =
+                    0;
+
+                let bOnlyRows =
+                    0;
+
+                let changedCells =
+                    0;
+
+                let aBlankKeptB =
+                    0;
+
+                let sameValues =
+                    0;
+
+                let ambiguous =
+                    0;
+
+
+                const changedByTarget =
+                    new Map();
+
+
+                for (
+                    const target
+                    of bTargets
+                ) {
+
+                    changedByTarget.set(
+                        target,
+                        0
+                    );
+                }
+
+
+                for (
+                    const bRow
+                    of bRows
+                ) {
+
+                    const match =
+                        chooseARow(
+                            bRow,
+                            aByKey.get(
+                                bRow.key
+                            )
+                            || [],
+                            usedA
+                        );
+
+
+                    if (!match.row) {
+
+                        bOnlyRows++;
+
+                        continue;
+                    }
+
+
+                    const aRow =
+                        match.row;
+
+
+                    usedA.add(
+                        aRow.rowNumber
+                    );
+
+
+                    matchedRows++;
+
+
+                    if (
+                        match.ambiguous
+                    ) {
+
+                        ambiguous++;
+                    }
+
+
+                    for (
+                        const target
+                        of bTargets
+                    ) {
+
+                        if (
+                            !aHeader
+                                .columns
+                                .has(
+                                    target
+                                )
+                        ) {
+
+                            continue;
+                        }
+
+
+                        const aValue =
+                            aRow
+                                .values
+                                .get(
+                                    target
+                                )
+                            ?? '';
+
+
+                        /*
+                         * A 공란이면 B 유지
+                         */
+
+                        if (
+                            !hasText(
+                                aValue
+                            )
+                        ) {
+
+                            aBlankKeptB++;
+
+                            continue;
+                        }
+
+
+                        const bValue =
+                            bRow
+                                .values
+                                .get(
+                                    target
+                                )
+                            ?? '';
+
+
+                        const aText =
+                            String(
+                                aValue
+                            );
+
+
+                        const bText =
+                            String(
+                                bValue
+                            );
+
+
+                        const bColumn =
+                            bHeader
+                                .columns
+                                .get(
+                                    target
+                                );
+
+
+                        const bCell =
+                            findCellByColumn(
+                                bRow.row,
+                                bColumn
+                            );
+
+
+                        if (
+                            aText === bText &&
+                            !cellHasFormula(
+                                bCell
+                            )
+                        ) {
+
+                            sameValues++;
+
+                            continue;
+                        }
+
+
+                        setCellValue(
+                            bDoc,
+                            bRow.rowNumber,
+                            bColumn,
+                            aText
+                        );
+
+
+                        changedCells++;
+
+
+                        changedByTarget.set(
+                            target,
+                            (
+                                changedByTarget.get(
+                                    target
+                                )
+                                || 0
+                            )
+                            + 1
+                        );
+                    }
+                }
+
+
+                const aOnlyIgnored =
+                    aRows.length -
+                    usedA.size;
+
+
+                if (
+                    changedCells >
+                    0
+                ) {
+
+                    const newXml =
+                        new XMLSerializer()
+                            .serializeToString(
+                                bDoc
+                            );
+
+
+                    bBook.zip.setText(
+                        bPath,
+                        newXml
+                    );
+                }
+
+
+                processedSheets++;
+
+                totalBRows +=
+                    bRows.length;
+
+                totalMatchedRows +=
+                    matchedRows;
+
+                totalBOnlyRows +=
+                    bOnlyRows;
+
+                totalAOnlyIgnored +=
+                    aOnlyIgnored;
+
+                totalChangedCells +=
+                    changedCells;
+
+                totalABlankKeptB +=
+                    aBlankKeptB;
+
+                totalSameValues +=
+                    sameValues;
+
+                totalAmbiguous +=
+                    ambiguous;
+
+
+                const changedLines =
+                    bTargets
+                        .map(
+                            target =>
+                                `${
+                                    DISPLAY_NAMES[
+                                        target
+                                    ]
+                                    || target
+                                }: ${
+                                    changedByTarget.get(
+                                        target
+                                    )
+                                    || 0
+                                }`
+                        )
+                        .join(
+                            '\n'
+                        );
+
+
+                sheetLogs.push(
+
+                    `[${sheetName}]\n`
+
+                    +
+
+                    `B 기준 행: ${bRows.length}\n`
+
+                    +
+
+                    `A와 매칭: ${matchedRows}\n`
+
+                    +
+
+                    `B에만 있음(유지): ${bOnlyRows}\n`
+
+                    +
+
+                    `A에만 있음(무시): ${aOnlyIgnored}\n`
+
+                    +
+
+                    `실제 변경 셀: ${changedCells}\n`
+
+                    +
+
+                    `A 공란이라 B 유지: ${aBlankKeptB}\n`
+
+                    +
+
+                    `A/B 동일값: ${sameValues}\n`
+
+                    +
+
+                    `중복명 보조매칭: ${ambiguous}\n\n`
+
+                    +
+
+                    `항목별 변경\n${changedLines}`
+                );
+            }
+
+
+            if (
+                processedSheets ===
+                0
+            ) {
+
+                throw new Error(
+                    '처리 가능한 탭을 찾지 못했습니다.'
+                );
+            }
+
+
+            const outputName =
+                makeOutputName(
+                    bFile.name
+                );
+
+
+            const zipBytes =
+                bBook.zip.generate();
+
+
+            const blob =
+                new Blob(
+                    [
+                        zipBytes
+                    ],
+                    {
+                        type:
+                            getMimeType(
+                                bFile.name
+                            )
+                    }
+                );
+
+
+            downloadBlob(
+                blob,
+                outputName
+            );
+
+
+            logEl.textContent =
+
+                '병합 완료\n\n'
+
+                +
+
+                sheetLogs.join(
+                    '\n\n====================\n\n'
+                )
+
+                +
+
+                '\n\n####################\n'
+
+                +
+
+                '전체 결과\n'
+
+                +
+
+                '####################\n'
+
+                +
+
+                `처리 탭: ${processedSheets}\n`
+
+                +
+
+                `B 기준 행: ${totalBRows}\n`
+
+                +
+
+                `A와 매칭: ${totalMatchedRows}\n`
+
+                +
+
+                `B에만 있음(유지): ${totalBOnlyRows}\n`
+
+                +
+
+                `A에만 있음(무시): ${totalAOnlyIgnored}\n`
+
+                +
+
+                `실제 변경 셀: ${totalChangedCells}\n`
+
+                +
+
+                `A 공란이라 B 유지: ${totalABlankKeptB}\n`
+
+                +
+
+                `A/B 동일값: ${totalSameValues}\n`
+
+                +
+
+                `중복명 보조매칭: ${totalAmbiguous}\n\n`
+
+                +
+
+                `저장 파일\n${outputName}`;
+
+
+        } catch (
+            error
+        ) {
+
+            console.error(
+                error
+            );
+
+
+            logEl.textContent =
+
+                '병합 실패\n\n'
+
+                +
+
+                (
+                    error?.message
+                    ||
+                    String(
+                        error
+                    )
+                );
+
+        } finally {
+
+            button.disabled =
+                false;
+
+
+            button.textContent =
+                '번역 병합하기';
+
+
+            /*
+             * ARGOS가 버튼 스타일을 다시 덮어쓰는 것 방지
+             */
+
+            forceUiStyles();
+        }
+    }
+
+
+    function chooseARow(
+        bRow,
+        candidates,
+        usedA
+    ) {
+
+        const unused =
+            candidates.filter(
+                row =>
+                    !usedA.has(
+                        row.rowNumber
+                    )
+            );
+
+
+        if (
+            unused.length ===
+            0
+        ) {
+
+            return {
+                row: null,
+                ambiguous: false
+            };
+        }
+
+
+        if (
+            hasText(
+                bRow.id
+            )
+        ) {
+
+            const exactId =
+                unused.filter(
+                    row =>
+                        hasText(
+                            row.id
+                        )
+                        &&
+                        String(
+                            row.id
+                        )
+                        ===
+                        String(
+                            bRow.id
+                        )
+                );
+
+
+            if (
+                exactId.length ===
+                1
+            ) {
+
+                return {
+                    row: exactId[0],
+                    ambiguous: false
+                };
+            }
+        }
+
+
+        if (
+            hasText(
+                bRow.parent
+            )
+        ) {
+
+            const exactParent =
+                unused.filter(
+                    row =>
+                        hasText(
+                            row.parent
+                        )
+                        &&
+                        String(
+                            row.parent
+                        )
+                        ===
+                        String(
+                            bRow.parent
+                        )
+                );
+
+
+            if (
+                exactParent.length ===
+                1
+            ) {
+
+                return {
+                    row:
+                        exactParent[0],
+                    ambiguous:
+                        false
+                };
+            }
+        }
+
+
+        if (
+            hasText(
+                bRow.context
+            )
+        ) {
+
+            const exactContext =
+                unused.filter(
+                    row =>
+                        normalizeKey(
+                            row.context
+                        )
+                        ===
+                        normalizeKey(
+                            bRow.context
+                        )
+                );
+
+
+            if (
+                exactContext.length ===
+                1
+            ) {
+
+                return {
+                    row:
+                        exactContext[0],
+                    ambiguous:
+                        false
+                };
+            }
+        }
+
+
+        if (
+            unused.length ===
+            1
+        ) {
+
+            return {
+                row:
+                    unused[0],
+                ambiguous:
+                    false
+            };
+        }
+
+
+        return {
+            row:
+                unused[0],
+            ambiguous:
+                true
+        };
+    }
+
+
+    function extractRows(
+        sheetDoc,
+        sharedStrings,
+        headerInfo,
+        config,
+        targets
+    ) {
+
+        const result =
+            [];
+
+
+        for (
+            const row
+            of getRows(
+                sheetDoc
+            )
+        ) {
+
+            const rowNumber =
+                Number(
+                    row.getAttribute(
+                        'r'
+                    )
+                )
+                || 0;
+
+
+            if (
+                rowNumber <=
+                headerInfo.rowNumber
+            ) {
+
+                continue;
+            }
+
+
+            const keyColumn =
+                headerInfo
+                    .columns
+                    .get(
+                        config.key
+                    );
+
+
+            const key =
+                normalizeKey(
+                    readCellByColumn(
+                        row,
+                        keyColumn,
+                        sharedStrings
+                    )
+                );
+
+
+            if (!key) {
+
+                continue;
+            }
+
+
+            const values =
+                new Map();
+
+
+            for (
+                const target
+                of targets
+            ) {
+
+                const column =
+                    headerInfo
+                        .columns
+                        .get(
+                            target
+                        );
+
+
+                values.set(
+                    target,
+                    column
+                        ?
+                        readCellByColumn(
+                            row,
+                            column,
+                            sharedStrings
+                        )
+                        :
+                        ''
+                );
+            }
+
+
+            result.push({
+
+                row,
+
+                rowNumber,
+
+                key,
+
+                id:
+                    readCanonicalValue(
+                        row,
+                        headerInfo,
+                        config.id,
+                        sharedStrings
+                    ),
+
+                parent:
+                    readCanonicalValue(
+                        row,
+                        headerInfo,
+                        config.parent,
+                        sharedStrings
+                    ),
+
+                context:
+                    readCanonicalValue(
+                        row,
+                        headerInfo,
+                        config.context,
+                        sharedStrings
+                    ),
+
+                values
+            });
+        }
+
+
+        return result;
+    }
+
+
+    function readCanonicalValue(
+        row,
+        headerInfo,
+        canonical,
+        sharedStrings
+    ) {
+
+        if (
+            !canonical ||
+            !headerInfo
+                .columns
+                .has(
+                    canonical
+                )
+        ) {
+
+            return '';
+        }
+
+
+        return readCellByColumn(
+            row,
+            headerInfo
+                .columns
+                .get(
+                    canonical
+                ),
+            sharedStrings
+        );
+    }
+
+
+    function findHeaderInfo(
+        sheetDoc,
+        sharedStrings,
+        requiredKey
+    ) {
+
+        const rows =
+            getRows(
+                sheetDoc
+            )
+            .slice(
+                0,
+                MAX_HEADER_SCAN_ROWS
+            );
+
+
+        for (
+            const row
+            of rows
+        ) {
+
+            const columns =
+                new Map();
+
+
+            for (
+                const cell
+                of Array.from(
+                    row.getElementsByTagName(
+                        'c'
+                    )
+                )
+            ) {
+
+                const column =
+                    getColumnLetters(
+                        cell.getAttribute(
+                            'r'
+                        )
+                        || ''
+                    );
+
+
+                if (!column) {
+
+                    continue;
+                }
+
+
+                const canonical =
+                    canonicalHeader(
+                        getCellText(
+                            cell,
+                            sharedStrings
+                        )
+                    );
+
+
+                if (
+                    !canonical ||
+                    columns.has(
+                        canonical
+                    )
+                ) {
+
+                    continue;
+                }
+
+
+                columns.set(
+                    canonical,
+                    column
+                );
+            }
+
+
+            if (
+                columns.has(
+                    requiredKey
+                )
+            ) {
+
+                return {
+
+                    rowNumber:
+                        Number(
+                            row.getAttribute(
+                                'r'
+                            )
+                        )
+                        || 1,
+
+                    columns
+                };
+            }
+        }
+
+
+        return null;
+    }
+
+
+    function canonicalHeader(
+        value
+    ) {
+
+        const compact =
+            normalizeHeaderText(
+                value
+            )
+            .replace(
+                /\s+/g,
+                ''
+            );
+
+
+        if (!compact) {
+
+            return null;
+        }
+
+
+        if (
+            /^카테고리ID/i.test(
+                compact
+            )
+        ) {
+
+            return 'category_id';
+        }
+
+
+        if (
+            /^메뉴ID/i.test(
+                compact
+            )
+        ) {
+
+            return 'menu_id';
+        }
+
+
+        if (
+            /^옵션아이템ID/i.test(
+                compact
+            )
+        ) {
+
+            return 'option_item_id';
+        }
+
+
+        if (
+            /^옵션ID/i.test(
+                compact
+            )
+        ) {
+
+            return 'option_id';
+        }
+
+
+        if (
+            compact ===
+            '메뉴카테고리'
+        ) {
+
+            return 'menu_category';
+        }
+
+
+        const simple = {
+
+            '한국어이름':
+                'ko_name',
+
+            '한국어메뉴명':
+                'ko_name',
+
+            '영어이름':
+                'en_name',
+
+            '영어메뉴명':
+                'en_name',
+
+            '중국어이름':
+                'zh_name',
+
+            '중국어메뉴명':
+                'zh_name',
+
+            '일본어이름':
+                'ja_name',
+
+            '일본어메뉴명':
+                'ja_name',
+
+            '러시아어이름':
+                'ru_name',
+
+            '러시아어메뉴명':
+                'ru_name',
+
+            '한국어설명':
+                'ko_desc',
+
+            '영어설명':
+                'en_desc',
+
+            '중국어설명':
+                'zh_desc',
+
+            '일본어설명':
+                'ja_desc',
+
+            '러시아어설명':
+                'ru_desc'
+        };
+
+
+        if (
+            simple[
+                compact
+            ]
+        ) {
+
+            return simple[
+                compact
+            ];
+        }
+
+
+        if (
+            /^\(한국어\)옵션명(?:\(선택분류명\))?$/.test(
+                compact
+            )
+            ||
+            /^한국어옵션명(?:\(선택분류명\))?$/.test(
+                compact
+            )
+        ) {
+
+            return 'ko_option';
+        }
+
+
+        if (
+            /^\(영어\)옵션명$/.test(
+                compact
+            )
+            ||
+            /^영어옵션명$/.test(
+                compact
+            )
+        ) {
+
+            return 'en_option';
+        }
+
+
+        if (
+            /^\(중국어\)옵션명$/.test(
+                compact
+            )
+            ||
+            /^중국어옵션명$/.test(
+                compact
+            )
+        ) {
+
+            return 'zh_option';
+        }
+
+
+        if (
+            /^\(일본어\)옵션명$/.test(
+                compact
+            )
+            ||
+            /^일본어옵션명$/.test(
+                compact
+            )
+        ) {
+
+            return 'ja_option';
+        }
+
+
+        if (
+            /^\(러시아어\)옵션명$/.test(
+                compact
+            )
+            ||
+            /^러시아어옵션명$/.test(
+                compact
+            )
+        ) {
+
+            return 'ru_option';
+        }
+
+
+        if (
+            /^\(한국어\)옵션아이템명$/.test(
+                compact
+            )
+            ||
+            /^한국어옵션아이템명$/.test(
+                compact
+            )
+        ) {
+
+            return 'ko_option_item';
+        }
+
+
+        if (
+            /^\(영어\)옵션아이템명$/.test(
+                compact
+            )
+            ||
+            /^영어옵션아이템명$/.test(
+                compact
+            )
+        ) {
+
+            return 'en_option_item';
+        }
+
+
+        if (
+            /^\(중국어\)옵션아이템명$/.test(
+                compact
+            )
+            ||
+            /^중국어옵션아이템명$/.test(
+                compact
+            )
+        ) {
+
+            return 'zh_option_item';
+        }
+
+
+        if (
+            /^\(일본어\)옵션아이템명$/.test(
+                compact
+            )
+            ||
+            /^일본어옵션아이템명$/.test(
+                compact
+            )
+        ) {
+
+            return 'ja_option_item';
+        }
+
+
+        if (
+            /^\(러시아어\)옵션아이템명$/.test(
+                compact
+            )
+            ||
+            /^러시아어옵션아이템명$/.test(
+                compact
+            )
+        ) {
+
+            return 'ru_option_item';
+        }
+
+
+        return null;
+    }
+
+
+    function normalizeHeaderText(
+        value
+    ) {
+
+        return String(
+            value ?? ''
+        )
+
+        .replace(
+            /_x000D_/gi,
+            ' '
+        )
+
+        .replace(
+            /\r\n|\r|\n/g,
+            ' '
+        )
+
+        .replace(
+            /\u00a0/g,
+            ' '
+        )
+
+        .replace(
+            /\s+/g,
+            ' '
+        )
+
+        .trim()
+
+        .normalize(
+            'NFC'
+        );
+    }
+
+
+    function normalizeKey(
+        value
+    ) {
+
+        return String(
+            value ?? ''
+        )
+
+        .replace(
+            /_x000D_/gi,
+            ' '
+        )
+
+        .replace(
+            /\r\n|\r|\n/g,
+            ' '
+        )
+
+        .replace(
+            /\u00a0/g,
+            ' '
+        )
+
+        .replace(
+            /\s+/g,
+            ' '
+        )
+
+        .trim()
+
+        .normalize(
+            'NFC'
+        );
+    }
+
+
+    function hasText(
+        value
+    ) {
+
+        return String(
+            value ?? ''
+        )
+        .trim()
+        .length > 0;
+    }
+
+
+    function getRows(
+        sheetDoc
+    ) {
+
+        return Array.from(
+            sheetDoc
+                .getElementsByTagName(
+                    'row'
+                )
+        );
+    }
+
+
+    function findCellByColumn(
+        row,
+        column
+    ) {
+
+        if (!column) {
+
+            return null;
+        }
+
+
+        return (
+            Array.from(
+                row.getElementsByTagName(
+                    'c'
+                )
+            )
+            .find(
+                cell =>
+                    getColumnLetters(
+                        cell.getAttribute(
+                            'r'
+                        )
+                        || ''
+                    )
+                    ===
+                    column
+            )
+            || null
+        );
+    }
+
+
+    function readCellByColumn(
+        row,
+        column,
+        sharedStrings
+    ) {
+
+        const cell =
+            findCellByColumn(
+                row,
+                column
+            );
+
+
+        return cell
+            ?
+            getCellText(
+                cell,
+                sharedStrings
+            )
+            :
+            '';
+    }
+
+
+    function getCellText(
+        cell,
+        sharedStrings
+    ) {
+
+        if (!cell) {
+
+            return '';
+        }
+
+
+        const type =
+            cell.getAttribute(
+                't'
+            );
+
+
+        if (
+            type ===
+            'inlineStr'
+        ) {
+
+            return Array.from(
+                cell.getElementsByTagName(
+                    't'
+                )
+            )
+            .map(
+                node =>
+                    node.textContent
+                    || ''
+            )
+            .join('');
+        }
+
+
+        const valueNode =
+            cell.getElementsByTagName(
+                'v'
+            )[0];
+
+
+        const raw =
+            valueNode
+                ?
+                (
+                    valueNode.textContent
+                    || ''
+                )
+                :
+                '';
+
+
+        if (
+            type ===
+            's'
+        ) {
+
+            const index =
+                Number(
+                    raw
+                );
+
+
+            return Number.isFinite(
+                index
+            )
+                ?
+                (
+                    sharedStrings[
+                        index
+                    ]
+                    ?? ''
+                )
+                :
+                '';
+        }
+
+
+        return raw;
+    }
+
+
+    function cellHasFormula(
+        cell
+    ) {
+
+        return (
+            !!cell
+            &&
+            cell.getElementsByTagName(
+                'f'
+            ).length > 0
+        );
+    }
+
+
+    function setCellValue(
+        sheetDoc,
+        rowNumber,
+        column,
+        value
+    ) {
+
+        const ns =
+            sheetDoc
+                .documentElement
+                .namespaceURI
+            ||
+            'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+
+
+        const row =
+            getRows(
+                sheetDoc
+            )
+            .find(
+                current =>
+                    Number(
+                        current.getAttribute(
+                            'r'
+                        )
+                    )
+                    ===
+                    rowNumber
+            );
+
+
+        if (!row) {
+
+            throw new Error(
+                `${rowNumber}행을 찾을 수 없습니다.`
+            );
+        }
+
+
+        const ref =
+            `${column}${rowNumber}`;
+
+
+        let cell =
+            findCellByColumn(
+                row,
+                column
+            );
+
+
+        if (!cell) {
+
+            cell =
+                sheetDoc.createElementNS(
+                    ns,
+                    'c'
+                );
+
+
+            cell.setAttribute(
+                'r',
+                ref
+            );
+
+
+            insertCellInOrder(
+                row,
+                cell
+            );
+        }
+
+
+        for (
+            const tag
+            of [
+                'f',
+                'v',
+                'is'
+            ]
+        ) {
+
+            for (
+                const node
+                of Array.from(
+                    cell.getElementsByTagName(
+                        tag
+                    )
+                )
+            ) {
+
+                node.remove();
+            }
+        }
+
+
+        if (
+            value ===
+            ''
+        ) {
+
+            cell.removeAttribute(
+                't'
+            );
+
+            return;
+        }
+
+
+        cell.setAttribute(
+            't',
+            'inlineStr'
+        );
+
+
+        const is =
+            sheetDoc.createElementNS(
+                ns,
+                'is'
+            );
+
+
+        const text =
+            sheetDoc.createElementNS(
+                ns,
+                't'
+            );
+
+
+        text.textContent =
+            value;
+
+
+        is.appendChild(
+            text
+        );
+
+
+        cell.appendChild(
+            is
+        );
+    }
+
+
+    function insertCellInOrder(
+        row,
+        newCell
+    ) {
+
+        const newColumn =
+            columnToNumber(
+                getColumnLetters(
+                    newCell.getAttribute(
+                        'r'
+                    )
+                    || ''
+                )
+            );
+
+
+        const cells =
+            Array.from(
+                row.getElementsByTagName(
+                    'c'
+                )
+            );
+
+
+        const before =
+            cells.find(
+                cell =>
+                    columnToNumber(
+                        getColumnLetters(
+                            cell.getAttribute(
+                                'r'
+                            )
+                            || ''
+                        )
+                    )
+                    >
+                    newColumn
+            );
+
+
+        if (before) {
+
+            row.insertBefore(
+                newCell,
+                before
+            );
+
+        } else {
+
+            row.appendChild(
+                newCell
+            );
+        }
+    }
+
+
+    async function loadXlsx(
+        buffer
+    ) {
+
+        const zip =
+            await LocalZip.load(
+                buffer
+            );
+
+
+        const workbookXml =
+            zip.getText(
+                'xl/workbook.xml'
+            );
+
+
+        const relsXml =
+            zip.getText(
+                'xl/_rels/workbook.xml.rels'
+            );
+
+
+        if (
+            workbookXml == null ||
+            relsXml == null
+        ) {
+
+            throw new Error(
+                '정상적인 XLSX/XLSM 파일이 아닙니다.'
+            );
+        }
+
+
+        const workbookDoc =
+            parseXml(
+                workbookXml
+            );
+
+
+        const relsDoc =
+            parseXml(
+                relsXml
+            );
+
+
+        const relationMap =
+            new Map();
+
+
+        for (
+            const relation
+            of Array.from(
+                relsDoc.getElementsByTagName(
+                    'Relationship'
+                )
+            )
+        ) {
+
+            relationMap.set(
+                relation.getAttribute(
+                    'Id'
+                ),
+                relation.getAttribute(
+                    'Target'
+                )
+            );
+        }
+
+
+        const sheetMap =
+            new Map();
+
+
+        for (
+            const sheet
+            of Array.from(
+                workbookDoc.getElementsByTagName(
+                    'sheet'
+                )
+            )
+        ) {
+
+            const name =
+                sheet.getAttribute(
+                    'name'
+                );
+
+
+            const rid =
+                sheet.getAttribute(
+                    'r:id'
+                )
+                ||
+                sheet.getAttributeNS(
+                    'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+                    'id'
+                );
+
+
+            const target =
+                relationMap.get(
+                    rid
+                );
+
+
+            if (
+                name &&
+                target
+            ) {
+
+                sheetMap.set(
+                    name,
+                    resolveXlPath(
+                        target
+                    )
+                );
+            }
+        }
+
+
+        return {
+
+            zip,
+
+            sheetMap,
+
+            sharedStrings:
+                readSharedStrings(
+                    zip
+                )
+        };
+    }
+
+
+    function readSharedStrings(
+        zip
+    ) {
+
+        const xml =
+            zip.getText(
+                'xl/sharedStrings.xml'
+            );
+
+
+        if (
+            xml == null
+        ) {
+
+            return [];
+        }
+
+
+        const doc =
+            parseXml(
+                xml
+            );
+
+
+        const result =
+            [];
+
+
+        for (
+            const si
+            of Array.from(
+                doc.getElementsByTagName(
+                    'si'
+                )
+            )
+        ) {
+
+            result.push(
+                Array.from(
+                    si.getElementsByTagName(
+                        't'
+                    )
+                )
+                .map(
+                    node =>
+                        node.textContent
+                        || ''
+                )
+                .join('')
+            );
+        }
+
+
+        return result;
+    }
+
+
+    class LocalZip {
+
+        constructor(
+            entries
+        ) {
+
+            this.entries =
+                entries;
+        }
+
+
+        static async load(
+            buffer
+        ) {
+
+            const bytes =
+                new Uint8Array(
+                    buffer
+                );
+
+
+            const view =
+                new DataView(
+                    bytes.buffer,
+                    bytes.byteOffset,
+                    bytes.byteLength
+                );
+
+
+            const eocd =
+                findEndOfCentralDirectory(
+                    bytes
+                );
+
+
+            const entryCount =
+                view.getUint16(
+                    eocd + 10,
+                    true
+                );
+
+
+            const centralOffset =
+                view.getUint32(
+                    eocd + 16,
+                    true
+                );
+
+
+            const decoder =
+                new TextDecoder(
+                    'utf-8'
+                );
+
+
+            const entries =
+                new Map();
+
+
+            let position =
+                centralOffset;
+
+
+            for (
+                let i = 0;
+                i < entryCount;
+                i++
+            ) {
+
+                if (
+                    view.getUint32(
+                        position,
+                        true
+                    )
+                    !==
+                    0x02014b50
+                ) {
+
+                    throw new Error(
+                        'XLSX ZIP 구조를 읽지 못했습니다.'
+                    );
+                }
+
+
+                const flags =
+                    view.getUint16(
+                        position + 8,
+                        true
+                    );
+
+
+                const method =
+                    view.getUint16(
+                        position + 10,
+                        true
+                    );
+
+
+                const modTime =
+                    view.getUint16(
+                        position + 12,
+                        true
+                    );
+
+
+                const modDate =
+                    view.getUint16(
+                        position + 14,
+                        true
+                    );
+
+
+                const compressedSize =
+                    view.getUint32(
+                        position + 20,
+                        true
+                    );
+
+
+                const nameLength =
+                    view.getUint16(
+                        position + 28,
+                        true
+                    );
+
+
+                const extraLength =
+                    view.getUint16(
+                        position + 30,
+                        true
+                    );
+
+
+                const commentLength =
+                    view.getUint16(
+                        position + 32,
+                        true
+                    );
+
+
+                const localOffset =
+                    view.getUint32(
+                        position + 42,
+                        true
+                    );
+
+
+                if (
+                    flags &
+                    0x0001
+                ) {
+
+                    throw new Error(
+                        '암호화된 XLSX는 처리할 수 없습니다.'
+                    );
+                }
+
+
+                const name =
+                    decoder.decode(
+                        bytes.slice(
+                            position + 46,
+                            position +
+                            46 +
+                            nameLength
+                        )
+                    );
+
+
+                const localNameLength =
+                    view.getUint16(
+                        localOffset + 26,
+                        true
+                    );
+
+
+                const localExtraLength =
+                    view.getUint16(
+                        localOffset + 28,
+                        true
+                    );
+
+
+                const dataStart =
+                    localOffset +
+                    30 +
+                    localNameLength +
+                    localExtraLength;
+
+
+                const compressed =
+                    bytes.slice(
+                        dataStart,
+                        dataStart +
+                        compressedSize
+                    );
+
+
+                let data;
+
+
+                if (
+                    method ===
+                    0
+                ) {
+
+                    data =
+                        compressed.slice();
+
+                } else if (
+                    method ===
+                    8
+                ) {
+
+                    data =
+                        await inflateRaw(
+                            compressed
+                        );
+
+                } else {
+
+                    throw new Error(
+                        `지원하지 않는 XLSX 압축 방식: ${method}`
+                    );
+                }
+
+
+                entries.set(
+                    name,
+                    {
+                        name,
+                        data,
+                        modTime,
+                        modDate
+                    }
+                );
+
+
+                position +=
+                    46 +
+                    nameLength +
+                    extraLength +
+                    commentLength;
+            }
+
+
+            return new LocalZip(
+                entries
+            );
+        }
+
+
+        getText(
+            name
+        ) {
+
+            const entry =
+                this.entries.get(
+                    name
+                );
+
+
+            if (!entry) {
+
+                return null;
+            }
+
+
+            return new TextDecoder(
+                'utf-8'
+            )
+            .decode(
+                entry.data
+            );
+        }
+
+
+        setText(
+            name,
+            text
+        ) {
+
+            const old =
+                this.entries.get(
+                    name
+                );
+
+
+            this.entries.set(
+                name,
+                {
+                    name,
+                    data:
+                        new TextEncoder()
+                            .encode(
+                                text
+                            ),
+                    modTime:
+                        old?.modTime
+                        || 0,
+                    modDate:
+                        old?.modDate
+                        || 0
+                }
+            );
+        }
+
+
+        generate() {
+
+            const encoder =
+                new TextEncoder();
+
+
+            const records =
+                [];
+
+
+            let localTotal =
+                0;
+
+
+            let centralTotal =
+                0;
+
+
+            for (
+                const entry
+                of this.entries.values()
+            ) {
+
+                const nameBytes =
+                    encoder.encode(
+                        entry.name
+                    );
+
+
+                const data =
+                    entry.data;
+
+
+                const crc =
+                    crc32(
+                        data
+                    );
+
+
+                const localLength =
+                    30 +
+                    nameBytes.length +
+                    data.length;
+
+
+                const centralLength =
+                    46 +
+                    nameBytes.length;
+
+
+                records.push({
+
+                    entry,
+
+                    nameBytes,
+
+                    data,
+
+                    crc,
+
+                    localLength,
+
+                    centralLength,
+
+                    offset:
+                        localTotal
+                });
+
+
+                localTotal +=
+                    localLength;
+
+
+                centralTotal +=
+                    centralLength;
+            }
+
+
+            const output =
+                new Uint8Array(
+                    localTotal +
+                    centralTotal +
+                    22
+                );
+
+
+            const view =
+                new DataView(
+                    output.buffer
+                );
+
+
+            let position =
+                0;
+
+
+            for (
+                const record
+                of records
+            ) {
+
+                view.setUint32(
+                    position,
+                    0x04034b50,
+                    true
+                );
+
+                view.setUint16(
+                    position + 4,
+                    20,
+                    true
+                );
+
+                view.setUint16(
+                    position + 6,
+                    0x0800,
+                    true
+                );
+
+                view.setUint16(
+                    position + 8,
+                    0,
+                    true
+                );
+
+                view.setUint32(
+                    position + 14,
+                    record.crc,
+                    true
+                );
+
+                view.setUint32(
+                    position + 18,
+                    record.data.length,
+                    true
+                );
+
+                view.setUint32(
+                    position + 22,
+                    record.data.length,
+                    true
+                );
+
+                view.setUint16(
+                    position + 26,
+                    record.nameBytes.length,
+                    true
+                );
+
+
+                output.set(
+                    record.nameBytes,
+                    position + 30
+                );
+
+
+                output.set(
+                    record.data,
+                    position +
+                    30 +
+                    record.nameBytes.length
+                );
+
+
+                position +=
+                    record.localLength;
+            }
+
+
+            const centralStart =
+                position;
+
+
+            for (
+                const record
+                of records
+            ) {
+
+                view.setUint32(
+                    position,
+                    0x02014b50,
+                    true
+                );
+
+                view.setUint16(
+                    position + 4,
+                    20,
+                    true
+                );
+
+                view.setUint16(
+                    position + 6,
+                    20,
+                    true
+                );
+
+                view.setUint16(
+                    position + 8,
+                    0x0800,
+                    true
+                );
+
+                view.setUint32(
+                    position + 16,
+                    record.crc,
+                    true
+                );
+
+                view.setUint32(
+                    position + 20,
+                    record.data.length,
+                    true
+                );
+
+                view.setUint32(
+                    position + 24,
+                    record.data.length,
+                    true
+                );
+
+                view.setUint16(
+                    position + 28,
+                    record.nameBytes.length,
+                    true
+                );
+
+                view.setUint32(
+                    position + 42,
+                    record.offset,
+                    true
+                );
+
+
+                output.set(
+                    record.nameBytes,
+                    position + 46
+                );
+
+
+                position +=
+                    record.centralLength;
+            }
+
+
+            const centralSize =
+                position -
+                centralStart;
+
+
+            view.setUint32(
+                position,
+                0x06054b50,
+                true
+            );
+
+            view.setUint16(
+                position + 8,
+                records.length,
+                true
+            );
+
+            view.setUint16(
+                position + 10,
+                records.length,
+                true
+            );
+
+            view.setUint32(
+                position + 12,
+                centralSize,
+                true
+            );
+
+            view.setUint32(
+                position + 16,
+                centralStart,
+                true
+            );
+
+
+            return output;
+        }
+    }
+
+
+    function findEndOfCentralDirectory(
+        bytes
+    ) {
+
+        const view =
+            new DataView(
+                bytes.buffer,
+                bytes.byteOffset,
+                bytes.byteLength
+            );
+
+
+        for (
+            let i =
+                bytes.length - 22;
+            i >= 0;
+            i--
+        ) {
+
+            if (
+                view.getUint32(
+                    i,
+                    true
+                )
+                ===
+                0x06054b50
+            ) {
+
+                return i;
+            }
+        }
+
+
+        throw new Error(
+            'XLSX ZIP 종료 정보를 찾지 못했습니다.'
+        );
+    }
+
+
+    async function inflateRaw(
+        bytes
+    ) {
+
+        const stream =
+            new Blob(
+                [
+                    bytes
+                ]
+            )
+            .stream()
+            .pipeThrough(
+                new DecompressionStream(
+                    'deflate-raw'
+                )
+            );
+
+
+        const buffer =
+            await new Response(
+                stream
+            )
+            .arrayBuffer();
+
+
+        return new Uint8Array(
+            buffer
+        );
+    }
+
+
+    let CRC32_TABLE =
+        null;
+
+
+    function crc32(
+        bytes
+    ) {
+
+        if (
+            !CRC32_TABLE
+        ) {
+
+            CRC32_TABLE =
+                new Uint32Array(
+                    256
+                );
+
+
+            for (
+                let n = 0;
+                n < 256;
+                n++
+            ) {
+
+                let c =
+                    n;
+
+
+                for (
+                    let k = 0;
+                    k < 8;
+                    k++
+                ) {
+
+                    c =
+                        c & 1
+                            ?
+                            0xEDB88320 ^
+                            (
+                                c >>> 1
+                            )
+                            :
+                            c >>> 1;
+                }
+
+
+                CRC32_TABLE[n] =
+                    c >>> 0;
+            }
+        }
+
+
+        let crc =
+            0xffffffff;
+
+
+        for (
+            const byte
+            of bytes
+        ) {
+
+            crc =
+                CRC32_TABLE[
+                    (
+                        crc ^
+                        byte
+                    )
+                    &
+                    0xff
+                ]
+                ^
+                (
+                    crc >>> 8
+                );
+        }
+
+
+        return (
+            crc ^
+            0xffffffff
+        )
+        >>> 0;
+    }
+
+
+    function parseXml(
+        text
+    ) {
+
+        const doc =
+            new DOMParser()
+                .parseFromString(
+                    text,
+                    'application/xml'
+                );
+
+
+        if (
+            doc.getElementsByTagName(
+                'parsererror'
+            )[0]
+        ) {
+
+            throw new Error(
+                'Excel 내부 XML 오류가 발생했습니다.'
+            );
+        }
+
+
+        return doc;
+    }
+
+
+    function resolveXlPath(
+        target
+    ) {
+
+        if (
+            target.startsWith(
+                '/'
+            )
+        ) {
+
+            return target.replace(
+                /^\//,
+                ''
+            );
+        }
+
+
+        const parts =
+            (`xl/${target}`)
+                .split(
+                    '/'
+                );
+
+
+        const output =
+            [];
+
+
+        for (
+            const part
+            of parts
+        ) {
+
+            if (
+                !part ||
+                part === '.'
+            ) {
+
+                continue;
+            }
+
+
+            if (
+                part === '..'
+            ) {
+
+                output.pop();
+
+            } else {
+
+                output.push(
+                    part
+                );
+            }
+        }
+
+
+        return output.join(
+            '/'
+        );
+    }
+
+
+    function getColumnLetters(
+        ref
+    ) {
+
+        const match =
+            String(
+                ref || ''
+            )
+            .match(
+                /^([A-Z]+)\d+$/i
+            );
+
+
+        return match
+            ?
+            match[1]
+                .toUpperCase()
+            :
+            '';
+    }
+
+
+    function columnToNumber(
+        column
+    ) {
+
+        let result =
+            0;
+
+
+        for (
+            const char
+            of column
+        ) {
+
+            result =
+                result * 26
+                +
+                (
+                    char.charCodeAt(
+                        0
+                    )
+                    -
+                    64
+                );
+        }
+
+
+        return result;
+    }
+
+
+    function makeOutputName(
+        name
+    ) {
+
+        const match =
+            name.match(
+                /^(.*?)(\.(xlsx|xlsm))$/i
+            );
+
+
+        if (!match) {
+
+            return (
+                `${name}_완성본.xlsx`
+            );
+        }
+
+
+        return (
+            `${match[1]}_완성본${match[2]}`
+        );
+    }
+
+
+    function getMimeType(
+        name
+    ) {
+
+        return /\.xlsm$/i.test(
+            name
+        )
+            ?
+            'application/vnd.ms-excel.sheet.macroEnabled.12'
+            :
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+
+
+    function downloadBlob(
+        blob,
+        filename
+    ) {
+
+        const url =
+            URL.createObjectURL(
+                blob
+            );
+
+
+        const link =
+            document.createElement(
+                'a'
+            );
+
+
+        link.href =
+            url;
+
+
+        link.download =
+            filename;
+
+
+        document.body.appendChild(
+            link
+        );
+
+
+        link.click();
+
+
+        link.remove();
+
+
+        setTimeout(
+            () =>
+                URL.revokeObjectURL(
+                    url
+                ),
+            3000
+        );
+    }
+
+})();
